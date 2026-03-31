@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Candidate Tracker - HHA/PCA Database</title>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/react.production.min.js"></script>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.6.2/axios.min.js"></script>
+    <style>
+        body { 
+            margin: 0; 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif; 
+            background: #f9fafb;
+        }
+        .loading { 
+            text-align: center; 
+            padding: 60px 20px; 
+            font-size: 18px; 
+            color: #666; 
+        }
+    </style>
+</head>
+<body>
+    <div id="root" class="loading">Loading candidate data...</div>
+    
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        function CandidateTracker() {
+            const [candidates, setCandidates] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [statusFilter, setStatusFilter] = useState('all');
+            const [availabilityFilter, setAvailabilityFilter] = useState('all');
+
+            // CONFIGURATION - Replace with your values
+            const SHEET_ID = "19CkhLALHjysy8t_0SqSInO3dKdkykxfqS7ixUV54nhE";
+            const API_KEY = "YOUR_GOOGLE_API_KEY_HERE"; // Replace with your API key
+            const SHEET_NAME = "1: INTERVIEW";
+
+            useEffect(() => {
+                const fetchData = async () => {
+                    try {
+                        // Encode sheet name for URL
+                        const encodedSheetName = encodeURIComponent(SHEET_NAME);
+                        const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/'${SHEET_NAME}'?key=${API_KEY}`;
+                        
+                        const response = await axios.get(url);
+                        
+                        const rows = response.data.values || [];
+                        if (rows.length === 0) {
+                            setError('No data found in Google Sheet');
+                            setLoading(false);
+                            return;
+                        }
+
+                        const headers = rows[0];
+                        
+                        const data = rows.slice(1).map(row => {
+                            const obj = {};
+                            headers.forEach((header, i) => {
+                                obj[header] = row[i] || '';
+                            });
+                            return obj;
+                        });
+                        
+                        setCandidates(data.filter(d => d['Full Name'])); // Filter out empty rows
+                        setLoading(false);
+                    } catch (err) {
+                        console.error('Error fetching data:', err);
+                        setError('Failed to load data. Check your API key and Sheet ID.');
+                        setLoading(false);
+                    }
+                };
+                
+                if (API_KEY !== "YOUR_GOOGLE_API_KEY_HERE") {
+                    fetchData();
+                } else {
+                    setError('Please configure your Google Sheets API key in the code');
+                    setLoading(false);
+                }
+            }, []);
+
+            const filteredCandidates = useMemo(() => {
+                return candidates.filter(candidate => {
+                    const matchesSearch = 
+                        (candidate['Full Name']?.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                        (candidate['Town']?.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                        (candidate['Phone']?.includes(searchTerm)) ||
+                        (candidate['Email']?.toLowerCase().includes(searchTerm.toLowerCase()));
+                    
+                    const matchesStatus = statusFilter === 'all' || candidate['Status'] === statusFilter;
+                    
+                    const matchesAvailability = availabilityFilter === 'all' || 
+                        (candidate['Availability']?.includes(availabilityFilter));
+
+                    return matchesSearch && matchesStatus && matchesAvailability;
+                });
+            }, [searchTerm, statusFilter, availabilityFilter, candidates]);
+
+            const getStatusColor = (status) => {
+                const colors = {
+                    'Hired': 'bg-green-100 text-green-800 border-green-300',
+                    'No Show': 'bg-red-100 text-red-800 border-red-300',
+                    'DNP': 'bg-gray-100 text-gray-800 border-gray-300',
+                    'Pending Orientation': 'bg-yellow-100 text-yellow-800 border-yellow-300',
+                    'Rescheduled': 'bg-blue-100 text-blue-800 border-blue-300',
+                };
+                return colors[status] || 'bg-gray-100 text-gray-800 border-gray-300';
+            };
+
+            const getAvailabilityTypes = () => {
+                const types = new Set();
+                candidates.forEach(c => {
+                    if (c['Availability']) {
+                        c['Availability'].split(',').forEach(t => types.add(t.trim()));
+                    }
+                });
+                return Array.from(types);
+            };
+
+            const getStatusTypes = () => {
+                const types = new Set(candidates.map(c => c['Status']).filter(Boolean));
+                return Array.from(types);
+            };
+
+            if (error) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+                        <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
+                            <h2 className="text-2xl font-bold text-red-600 mb-4">Configuration Error</h2>
+                            <p className="text-gray-600 mb-4">{error}</p>
+                            <p className="text-sm text-gray-500">Make sure you:</p>
+                            <ul className="text-left text-sm text-gray-600 mt-4 space-y-2">
+                                <li>✓ Added your Google Sheets API key</li>
+                                <li>✓ Enabled Google Sheets API in Google Cloud Console</li>
+                                <li>✓ Made your Google Sheet publicly readable</li>
+                            </ul>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                        <div className="text-center">
+                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                            <p className="text-gray-600 text-lg">Loading candidate database...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gray-50">
+                    {/* Header */}
+                    <div className="bg-white shadow-sm border-b border-gray-200">
+                        <div className="max-w-7xl mx-auto px-4 md:px-6 py-8">
+                            <h1 className="text-4xl font-bold text-gray-900">HHA/PCA Candidate Database</h1>
+                            <p className="text-gray-600 mt-2">
+                                <span className="font-semibold text-blue-600">{candidates.length}</span> candidates total | 
+                                <span className="font-semibold text-blue-600 ml-2">{filteredCandidates.length}</span> results
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Main Content */}
+                    <div className="max-w-7xl mx-auto px-4 md:px-6 py-6">
+                        {/* Search & Filters */}
+                        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 mb-6">
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Search Candidates</label>
+                                    <input 
+                                        type="text" 
+                                        placeholder="Search by name, town, phone, or email..." 
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                                    />
+                                </div>
+                                
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Filter by Status</label>
+                                        <select 
+                                            value={statusFilter}
+                                            onChange={(e) => setStatusFilter(e.target.value)}
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                                        >
+                                            <option value="all">All Statuses</option>
+                                            {getStatusTypes().map(status => (
+                                                <option key={status} value={status}>{status}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Filter by Job Type</label>
+                                        <select 
+                                            value={availabilityFilter}
+                                            onChange={(e) => setAvailabilityFilter(e.target.value)}
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                                        >
+                                            <option value="all">All Job Types</option>
+                                            {getAvailabilityTypes().map(type => (
+                                                <option key={type} value={type}>{type}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Data Table */}
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-gray-100 border-b border-gray-200 sticky top-0">
+                                        <tr>
+                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Name</th>
+                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Location</th>
+                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Contact</th>
+                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Availability</th>
+                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Status</th>
+                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Interview Date</th>
+                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Notes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredCandidates.length > 0 ? (
+                                            filteredCandidates.map((candidate, idx) => (
+                                                <tr key={idx} className="border-b border-gray-200 hover:bg-blue-50 transition">
+                                                    <td className="px-6 py-4 font-medium text-gray-900">{candidate['Full Name']}</td>
+                                                    <td className="px-6 py-4 text-gray-700">{candidate['Town']}</td>
+                                                    <td className="px-6 py-4 text-sm">
+                                                        <div className="text-gray-600">{candidate['Phone']}</div>
+                                                        <div className="text-gray-500 truncate max-w-xs">{candidate['Email']}</div>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-gray-700 text-xs">{candidate['Availability']}</td>
+                                                    <td className="px-6 py-4">
+                                                        <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(candidate['Status'])}`}>
+                                                            {candidate['Status']}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-gray-600 text-xs">{candidate['Interview Date/Time']}</td>
+                                                    <td className="px-6 py-4 text-gray-600 text-xs max-w-xs truncate" title={candidate['Comments']}>
+                                                        {candidate['Comments'] || '-'}
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        ) : (
+                                            <tr>
+                                                <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
+                                                    <p className="text-lg">No candidates found matching your search</p>
+                                                    <p className="text-sm text-gray-400 mt-2">Try adjusting your filters</p>
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="mt-6 text-center text-xs text-gray-500">
+                            <p>Last updated: {new Date().toLocaleString()}</p>
+                            <p className="mt-1">Refresh the page to load the latest data from your Google Sheet</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<CandidateTracker />, document.getElementById('root'));
+    </script>
+</body>
+</html>
