@@ -37,19 +37,28 @@
             const [statusFilter, setStatusFilter] = useState('all');
             const [availabilityFilter, setAvailabilityFilter] = useState('all');
 
-            // CONFIGURATION - Replace with your values
+            // EXACT CONFIGURATION FROM YOUR SHEET
             const SHEET_ID = "19CkhLALHjysy8t_0SqSInO3dKdkykxfqS7ixUV54nhE";
-            const API_KEY = "AIzaSyBpo-wa-aJzi5nHKGQwHYp0u8tIvzIyZ3c";
+            const API_KEY = "AIzaSyBpo-wa-aJzi5nHKGQwHYp0u8tIvzIyZ3c"; 
             const SHEET_NAME = "1: INTERVIEW";
 
             useEffect(() => {
                 const fetchData = async () => {
                     try {
-                        // Encode sheet name for URL
-                        const encodedSheetName = encodeURIComponent(SHEET_NAME);
-                        const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/'${SHEET_NAME}'?key=${API_KEY}`;
+                        console.log("Starting fetch process...");
+                        
+                        if (API_KEY === "YOUR_GOOGLE_API_KEY_HERE") {
+                            throw new Error("Please add your API key to the code.");
+                        }
+
+                        // Make sure sheet name is properly encoded for the URL
+                        const encodedTab = encodeURIComponent(SHEET_NAME);
+                        const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodedTab}?key=${API_KEY}`;
+                        
+                        console.log("Fetching from:", url);
                         
                         const response = await axios.get(url);
+                        console.log("Data received:", response.data);
                         
                         const rows = response.data.values || [];
                         if (rows.length === 0) {
@@ -58,88 +67,108 @@
                             return;
                         }
 
+                        // The first row is the header
                         const headers = rows[0];
                         
+                        // Map the remaining rows to objects based on headers
                         const data = rows.slice(1).map(row => {
                             const obj = {};
                             headers.forEach((header, i) => {
-                                obj[header] = row[i] || '';
+                                obj[header.trim()] = row[i] ? row[i].trim() : '';
                             });
                             return obj;
                         });
                         
-                        setCandidates(data.filter(d => d['Full Name'])); // Filter out empty rows
+                        // Filter out completely blank rows based on 'NAME' column
+                        const validData = data.filter(d => d['NAME'] && d['NAME'] !== '');
+                        
+                        console.log("Parsed valid candidates:", validData.length);
+                        setCandidates(validData);
                         setLoading(false);
                     } catch (err) {
-                        console.error('Error fetching data:', err);
-                        setError('Failed to load data. Check your API key and Sheet ID.');
+                        console.error('Detailed Error:', err);
+                        
+                        let errorMessage = err.message;
+                        if (err.response && err.response.data && err.response.data.error) {
+                            errorMessage = err.response.data.error.message;
+                            
+                            if (errorMessage.includes("API key not valid")) {
+                                errorMessage = "Invalid API Key. Please check your Google Cloud Console.";
+                            } else if (errorMessage.includes("Unable to parse range")) {
+                                errorMessage = `Cannot find tab named "${SHEET_NAME}". Make sure the tab name matches exactly.`;
+                            } else if (errorMessage.includes("Request had insufficient authentication")) {
+                                errorMessage = "Sheet is private. Change sharing settings to 'Anyone with link can view'.";
+                            }
+                        }
+                        
+                        setError(`Connection failed: ${errorMessage}`);
                         setLoading(false);
                     }
                 };
                 
-                if (API_KEY !== "YOUR_GOOGLE_API_KEY_HERE") {
-                    fetchData();
-                } else {
-                    setError('Please configure your Google Sheets API key in the code');
-                    setLoading(false);
-                }
+                fetchData();
             }, []);
 
             const filteredCandidates = useMemo(() => {
                 return candidates.filter(candidate => {
                     const matchesSearch = 
-                        (candidate['Full Name']?.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                        (candidate['Town']?.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                        (candidate['Phone']?.includes(searchTerm)) ||
-                        (candidate['Email']?.toLowerCase().includes(searchTerm.toLowerCase()));
+                        (candidate['NAME']?.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                        (candidate['TOWN']?.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                        (candidate['PHONE']?.includes(searchTerm)) ||
+                        (candidate['EMAIL']?.toLowerCase().includes(searchTerm.toLowerCase()));
                     
-                    const matchesStatus = statusFilter === 'all' || candidate['Status'] === statusFilter;
+                    const matchesStatus = statusFilter === 'all' || candidate['STATUS'] === statusFilter;
                     
                     const matchesAvailability = availabilityFilter === 'all' || 
-                        (candidate['Availability']?.includes(availabilityFilter));
+                        (candidate['AVAILABILITY']?.includes(availabilityFilter));
 
                     return matchesSearch && matchesStatus && matchesAvailability;
                 });
             }, [searchTerm, statusFilter, availabilityFilter, candidates]);
 
             const getStatusColor = (status) => {
-                const colors = {
-                    'Hired': 'bg-green-100 text-green-800 border-green-300',
-                    'No Show': 'bg-red-100 text-red-800 border-red-300',
-                    'DNP': 'bg-gray-100 text-gray-800 border-gray-300',
-                    'Pending Orientation': 'bg-yellow-100 text-yellow-800 border-yellow-300',
-                    'Rescheduled': 'bg-blue-100 text-blue-800 border-blue-300',
-                };
-                return colors[status] || 'bg-gray-100 text-gray-800 border-gray-300';
+                const s = status ? status.toUpperCase() : '';
+                if (s === 'HIRED') return 'bg-green-100 text-green-800 border-green-300';
+                if (s === 'NO SHOW') return 'bg-red-100 text-red-800 border-red-300';
+                if (s === 'DNP') return 'bg-gray-100 text-gray-800 border-gray-300';
+                if (s === 'PENDING ORIENTATION') return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+                if (s === 'RESCHEDULED') return 'bg-blue-100 text-blue-800 border-blue-300';
+                return 'bg-gray-100 text-gray-800 border-gray-300';
             };
 
             const getAvailabilityTypes = () => {
                 const types = new Set();
                 candidates.forEach(c => {
-                    if (c['Availability']) {
-                        c['Availability'].split(',').forEach(t => types.add(t.trim()));
+                    if (c['AVAILABILITY']) {
+                        c['AVAILABILITY'].split(',').forEach(t => types.add(t.trim()));
                     }
                 });
-                return Array.from(types);
+                return Array.from(types).filter(Boolean).sort();
             };
 
             const getStatusTypes = () => {
-                const types = new Set(candidates.map(c => c['Status']).filter(Boolean));
-                return Array.from(types);
+                const types = new Set(candidates.map(c => c['STATUS']).filter(Boolean));
+                return Array.from(types).sort();
             };
 
             if (error) {
                 return (
                     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-                        <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
-                            <h2 className="text-2xl font-bold text-red-600 mb-4">Configuration Error</h2>
-                            <p className="text-gray-600 mb-4">{error}</p>
-                            <p className="text-sm text-gray-500">Make sure you:</p>
-                            <ul className="text-left text-sm text-gray-600 mt-4 space-y-2">
-                                <li>✓ Added your Google Sheets API key</li>
-                                <li>✓ Enabled Google Sheets API in Google Cloud Console</li>
-                                <li>✓ Made your Google Sheet publicly readable</li>
-                            </ul>
+                        <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center border-t-4 border-red-500">
+                            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <svg className="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                            </div>
+                            <h2 className="text-2xl font-bold text-gray-900 mb-2">Connection Error</h2>
+                            <p className="text-red-600 font-medium mb-6">{error}</p>
+                            
+                            <div className="text-left bg-gray-50 p-4 rounded text-sm text-gray-600">
+                                <p className="font-semibold text-gray-700 mb-2">Troubleshooting steps:</p>
+                                <ol className="list-decimal pl-5 space-y-1">
+                                    <li>Check browser console (F12) for exact details</li>
+                                    <li>Verify your API key is pasted correctly</li>
+                                    <li>Ensure the Sheet is shared as "Anyone with link"</li>
+                                </ol>
+                            </div>
                         </div>
                     </div>
                 );
@@ -150,7 +179,8 @@
                     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
                         <div className="text-center">
                             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                            <p className="text-gray-600 text-lg">Loading candidate database...</p>
+                            <p className="text-gray-600 text-lg font-medium">Connecting to Google Sheets...</p>
+                            <p className="text-gray-400 text-sm mt-2">Loading candidate database</p>
                         </div>
                     </div>
                 );
@@ -160,8 +190,8 @@
                 <div className="min-h-screen bg-gray-50">
                     {/* Header */}
                     <div className="bg-white shadow-sm border-b border-gray-200">
-                        <div className="max-w-7xl mx-auto px-4 md:px-6 py-8">
-                            <h1 className="text-4xl font-bold text-gray-900">HHA/PCA Candidate Database</h1>
+                        <div className="max-w-7xl mx-auto px-4 md:px-6 py-6">
+                            <h1 className="text-3xl font-bold text-gray-900">HHA/PCA Candidate Database</h1>
                             <p className="text-gray-600 mt-2">
                                 <span className="font-semibold text-blue-600">{candidates.length}</span> candidates total | 
                                 <span className="font-semibold text-blue-600 ml-2">{filteredCandidates.length}</span> results
@@ -173,46 +203,44 @@
                     <div className="max-w-7xl mx-auto px-4 md:px-6 py-6">
                         {/* Search & Filters */}
                         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 mb-6">
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Search Candidates</label>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="md:col-span-1">
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Search</label>
                                     <input 
                                         type="text" 
-                                        placeholder="Search by name, town, phone, or email..." 
+                                        placeholder="Name, town, phone..." 
                                         value={searchTerm}
                                         onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                                        className="w-full px-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
                                     />
                                 </div>
                                 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Filter by Status</label>
-                                        <select 
-                                            value={statusFilter}
-                                            onChange={(e) => setStatusFilter(e.target.value)}
-                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                                        >
-                                            <option value="all">All Statuses</option>
-                                            {getStatusTypes().map(status => (
-                                                <option key={status} value={status}>{status}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    
-                                    <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Filter by Job Type</label>
-                                        <select 
-                                            value={availabilityFilter}
-                                            onChange={(e) => setAvailabilityFilter(e.target.value)}
-                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                                        >
-                                            <option value="all">All Job Types</option>
-                                            {getAvailabilityTypes().map(type => (
-                                                <option key={type} value={type}>{type}</option>
-                                            ))}
-                                        </select>
-                                    </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Status Filter</label>
+                                    <select 
+                                        value={statusFilter}
+                                        onChange={(e) => setStatusFilter(e.target.value)}
+                                        className="w-full px-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                                    >
+                                        <option value="all">All Statuses</option>
+                                        {getStatusTypes().map(status => (
+                                            <option key={status} value={status}>{status}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Job Type</label>
+                                    <select 
+                                        value={availabilityFilter}
+                                        onChange={(e) => setAvailabilityFilter(e.target.value)}
+                                        className="w-full px-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                                    >
+                                        <option value="all">All Job Types</option>
+                                        {getAvailabilityTypes().map(type => (
+                                            <option key={type} value={type}>{type}</option>
+                                        ))}
+                                    </select>
                                 </div>
                             </div>
                         </div>
@@ -221,56 +249,64 @@
                         <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
                             <div className="overflow-x-auto">
                                 <table className="w-full text-sm">
-                                    <thead className="bg-gray-100 border-b border-gray-200 sticky top-0">
+                                    <thead className="bg-gray-100 border-b border-gray-200">
                                         <tr>
-                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Name</th>
+                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Name & Contact</th>
                                             <th className="px-6 py-4 text-left font-semibold text-gray-700">Location</th>
-                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Contact</th>
                                             <th className="px-6 py-4 text-left font-semibold text-gray-700">Availability</th>
+                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Interview</th>
                                             <th className="px-6 py-4 text-left font-semibold text-gray-700">Status</th>
-                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Interview Date</th>
-                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Notes</th>
+                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Recruiter Notes</th>
                                         </tr>
                                     </thead>
-                                    <tbody>
+                                    <tbody className="divide-y divide-gray-200">
                                         {filteredCandidates.length > 0 ? (
                                             filteredCandidates.map((candidate, idx) => (
-                                                <tr key={idx} className="border-b border-gray-200 hover:bg-blue-50 transition">
-                                                    <td className="px-6 py-4 font-medium text-gray-900">{candidate['Full Name']}</td>
-                                                    <td className="px-6 py-4 text-gray-700">{candidate['Town']}</td>
-                                                    <td className="px-6 py-4 text-sm">
-                                                        <div className="text-gray-600">{candidate['Phone']}</div>
-                                                        <div className="text-gray-500 truncate max-w-xs">{candidate['Email']}</div>
+                                                <tr key={idx} className="hover:bg-blue-50/50 transition">
+                                                    <td className="px-6 py-4 align-top">
+                                                        <div className="font-bold text-gray-900 text-base">{candidate['NAME']}</div>
+                                                        <div className="text-gray-600 mt-1">{candidate['PHONE']}</div>
+                                                        {candidate['EMAIL'] && <div className="text-gray-500 text-xs truncate max-w-[200px] mt-0.5">{candidate['EMAIL']}</div>}
                                                     </td>
-                                                    <td className="px-6 py-4 text-gray-700 text-xs">{candidate['Availability']}</td>
-                                                    <td className="px-6 py-4">
-                                                        <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(candidate['Status'])}`}>
-                                                            {candidate['Status']}
+                                                    <td className="px-6 py-4 align-top">
+                                                        <div className="text-gray-900 font-medium">{candidate['TOWN']}</div>
+                                                        <div className="mt-2 text-xs space-y-1">
+                                                            {candidate['CAN DRIVE'] === 'Yes' && <span className="inline-block bg-gray-100 text-gray-600 px-2 py-0.5 rounded mr-1">Drives</span>}
+                                                            {candidate['VALID HHA/PCA'] === 'Yes' && <span className="inline-block bg-blue-50 text-blue-600 px-2 py-0.5 rounded">HHA/PCA</span>}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4 align-top">
+                                                        <div className="font-medium text-gray-800">{candidate['AVAILABILITY'] || '-'}</div>
+                                                        <div className="text-gray-500 text-xs mt-1 leading-relaxed">{candidate['DAYS AVAILABLE']}</div>
+                                                    </td>
+                                                    <td className="px-6 py-4 align-top">
+                                                        <div className="text-gray-800">{candidate['INTERVIEW DATE'] || '-'}</div>
+                                                        {candidate['SCHEDULED BY'] && <div className="text-gray-500 text-xs mt-1">By: {candidate['SCHEDULED BY']}</div>}
+                                                    </td>
+                                                    <td className="px-6 py-4 align-top">
+                                                        <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getStatusColor(candidate['STATUS'])}`}>
+                                                            {candidate['STATUS'] || 'Unknown'}
                                                         </span>
                                                     </td>
-                                                    <td className="px-6 py-4 text-gray-600 text-xs">{candidate['Interview Date/Time']}</td>
-                                                    <td className="px-6 py-4 text-gray-600 text-xs max-w-xs truncate" title={candidate['Comments']}>
-                                                        {candidate['Comments'] || '-'}
+                                                    <td className="px-6 py-4 align-top text-gray-600 text-sm max-w-xs">
+                                                        {candidate['COMMENTS'] || <span className="text-gray-400 italic">No notes</span>}
                                                     </td>
                                                 </tr>
                                             ))
                                         ) : (
                                             <tr>
-                                                <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
-                                                    <p className="text-lg">No candidates found matching your search</p>
-                                                    <p className="text-sm text-gray-400 mt-2">Try adjusting your filters</p>
+                                                <td colSpan="6" className="px-6 py-16 text-center text-gray-500">
+                                                    <div className="mx-auto w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                                                        <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                                    </div>
+                                                    <p className="text-lg font-medium text-gray-900">No candidates found</p>
+                                                    <p className="text-sm mt-1">Try adjusting your search or filters</p>
                                                 </td>
                                             </tr>
                                         )}
                                     </tbody>
                                 </table>
                             </div>
-                        </div>
-
-                        {/* Footer */}
-                        <div className="mt-6 text-center text-xs text-gray-500">
-                            <p>Last updated: {new Date().toLocaleString()}</p>
-                            <p className="mt-1">Refresh the page to load the latest data from your Google Sheet</p>
                         </div>
                     </div>
                 </div>
